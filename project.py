@@ -2,7 +2,6 @@
 """
 Created on Thu Jul 20 12:39:56 2017
 
-@author: zagklaras
 """
 import pandas as pd
 
