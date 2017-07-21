@@ -1,2 +1,2 @@
 # tensorFlowProject
-SEntiment analysis in amazon food product reviews
+Sentiment analysis in amazon food product reviews
