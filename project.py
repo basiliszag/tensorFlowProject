@@ -108,3 +108,4 @@ for each in ReviewsTE['Review_Words']:
 #take score labels for both training and testing dataset     
 score_labels_tr = ReviewsTR['Score_label']
 score_labels_te = ReviewsTE['Score_label']
+
