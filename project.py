@@ -22,7 +22,7 @@ Reviews = pd.read_csv(path_in, sep=",", header = 'infer')
 ##keep only score and text columns
 Reviews.drop(Reviews.columns[[0,1,2,3,4,5,7,8]], axis=1, inplace=True)
 
-#len(Reviews) - #568454 reviews - to many reviews to handle
+#print(len(Reviews)) - #568454 reviews - to many reviews to handle
 
 ##remove punctuation and then lower case in a new column
 Reviews['CleanReview']=Reviews['Text'].astype(str)
@@ -33,7 +33,7 @@ def review_words(review_row):
     words = review_row.split()
     return( len(words))
 
-#Store review words ount in a separate column
+#Store review words count in a separate column
 Reviews['WordCount']=Reviews['CleanReview'].apply(lambda x: review_words(x))
 
 ##reviews max and min length
@@ -52,7 +52,7 @@ ReviewsN=ReviewsN.loc[Reviews['WordCount'] > 0]
 
 #print(len(ReviewsN))
 #435219 reviews with max length 100 words
-ReviewsN.groupby('Score').count()
+print(ReviewsN.groupby('Score').count())
 ##Group by Score(Label)
 #1 - 38797 
 #2 - 21130 
@@ -61,10 +61,10 @@ ReviewsN.groupby('Score').count()
 #5 - 289849
 
 #The model will predict only negative/positive, so we will change the score 1,2 to 0 and 3,4 to 1
-#Score 3 is ignored
+#Score 3 is ignored as neutral
 
 #Random Selection of specific reviews by group
-ReviewsNo = 30000
+ReviewsNo = 30000  #30000 for scores 1,4,5 and 21000 for score 2 since is less than 30000
 Reviews5 = ReviewsN.loc[ReviewsN['Score'] == 5].sample(ReviewsNo)
 Reviews4 = ReviewsN.loc[ReviewsN['Score'] == 4].sample(ReviewsNo)
 Reviews2 = ReviewsN.loc[ReviewsN['Score'] == 2].sample(21000)
@@ -79,11 +79,11 @@ TotalReviewsNo = 110000
 ReviewsF=ReviewsF.sample(TotalReviewsNo)
 
 #Reviews Random group by Score
-ReviewsF.groupby('Score').count()
-#1 - 29740 
-#2 - 20805 
-#4 - 29730 
-#5 - 29725 
+print(ReviewsF.groupby('Score').count())
+#1 - 29730 
+#2 - 20809 
+#4 - 29735 
+#5 - 29726 
 
 #Join all the words to build a corpus
 all_text = ' '.join(ReviewsF['CleanReview'])
@@ -92,7 +92,7 @@ words = all_text.split()
 # Count the word frequencies
 word_freq = nltk.FreqDist(words)
 print ("Found %d unique words tokens." % len(word_freq.items())) 
-#Found 64013  unique words tokens
+#Found 63987  unique words tokens
 
 #Create the dictionary that maps vocab words to integers
 #Later we're going to pad our input vectors with zeros, so the integers start at 1, not 0
@@ -100,7 +100,7 @@ from collections import Counter
 counts = Counter(words)
 vocab = sorted(counts, key=counts.get, reverse=True)
 vocab_to_int = {word: ii for ii, word in enumerate(vocab, 1)}
-#print(len(vocab_to_int)) #-64013
+#print(len(vocab_to_int)) #-63987
 
 #create reviews to int using the vocabulary 
 reviews_ints = []
@@ -117,7 +117,7 @@ seq_len = n_steps
 features = np.zeros((len(reviews_ints), seq_len), dtype=int)
 
 for i, row in enumerate(reviews_ints):
-    if len(row)>0:
+    if len(row)>0: 
         features[i, -len(row):] = np.array(row)[:seq_len]
 
 #print test row
@@ -128,14 +128,13 @@ print(len(features[10]))
 print(reviews_ints[10])
 print(len(reviews_ints[10]))
 
-#Convert score to binary - values 1-3 means negative(0), values 4,5 means positive(1)
+#Convert score to binary - values 1-2 means negative(0), values 4,5 means positive(1)
 ReviewsF['Score_label']=ReviewsF['Score'].apply(lambda x: 0 if x < 3 else 1)
 #labels set as array
 labels=np.array(ReviewsF['Score_label'])
 
 #split data set into training, validation, and test sets
-#Usually split fraction is set to 0.8 or 0.9 for training 
-#The rest of the data will be split in half to create the validation and testing data.
+#Split fraction is set to 0.9 for training.The rest of the data are split in half to create the validation and testing data.
 split_frac = 0.9
 
 split_index = int(split_frac * len(features))
@@ -157,7 +156,7 @@ print("label set: \t\t{}".format(train_y.shape),
       "\nValidation label set: \t{}".format(val_y.shape),
       "\nTest label set: \t\t{}".format(test_y.shape))
 
-#With train, validation, and text fractions of 0.8, 0.1, 0.1, the final shapes looks like:
+#With train, validation, and text fractions of 0.9, 0.5, 0.5, the final shapes looks like:
 #Train set: (99000, 100) 
 #Validation set: (5500, 100) 
 #Test set: (5500, 100)
@@ -166,11 +165,11 @@ print("label set: \t\t{}".format(train_y.shape),
 #Test label set: (5500,)
 
 #Train set labels count
-#np.unique(train_y,return_counts=True) #0-45511, 1-53489
+#np.unique(train_y,return_counts=True) #0-45447, 1-53553
 #Val set labels count
-#np.unique(val_y,return_counts=True)   #0-2540, 1-2960
+#np.unique(val_y,return_counts=True)   #0-2546, 1-2954
 #Test set labels count
-#np.unique(test_y,return_counts=True)  #0-2494, 1-3006
+#np.unique(test_y,return_counts=True)  #0-2546, 1-2954
 
 
 #####################################################################################################
@@ -192,7 +191,7 @@ learning_rate = 0.01
 
 n_words = len(vocab_to_int) + 1 # Add 1 for 0 added to vocab
 
-# Create the graph object
+#Create the graph object
 tf.reset_default_graph()
 with tf.name_scope('inputs'):
     inputs_ = tf.placeholder(tf.int32, [None, None], name="inputs")
@@ -323,11 +322,11 @@ with tf.Session() as sess:
             print("Epoch: "+str('%04d' % (e+1))+" Cost="+"{:.9f}".format(np.mean(b_cost))+
                   " Train accuracy="+"{:.9f}".format(np.mean(b_tr_acc))+
                   " Val accuracy="+"{:.9f}".format(np.mean(b_te_acc)))
-            # add results to matrices
+            # add results to matrices at the end of each epoch
             epochs.append(e+1)
-            tr_acc.append(b_cost)
+            tr_acc.append(np.mean(b_tr_acc))
             val_acc.append(np.mean(b_te_acc))
-            costs.append(b_tr_acc)
+            costs.append(np.mean(b_cost))
         
         saver.save(sess, './sentiment_model.ckpt')
   
@@ -394,7 +393,7 @@ with tf.Session() as sess:
     test_pred_flat = (np.array(test_pred)).flatten()
     y_act = pd.Series(test_y, name='Actual')
     y_pred = pd.Series(test_pred_flat, name='Predicted')
-    df_confusion = pd.crosstab(y_actu, y_pred, margins=True)
+    df_confusion = pd.crosstab(y_act, y_pred, margins=True)
 
     print("Test accuracy: {:.3f}".format(np.mean(test_acc)))  
     print("Confusion Matrix")
