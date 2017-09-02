@@ -1,5 +1,5 @@
 # tensorFlowProject
-Sentiment analysis in Amazon Food Product reviews
+Sentiment analysis in Amazon Food Product reviews using RNN.
 
 ---
 Original dataset: https://www.kaggle.com/snap/amazon-fine-food-reviews
