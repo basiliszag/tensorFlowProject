@@ -1,288 +1,344 @@
-####Amazon Reviews - Test Version#####
+#####################################################################################################
+#####################   Import Libraries    #########################################################
+#####################################################################################################
+import numpy as np
+import pandas as pd
+import nltk
 
+import tensorflow as tf
 
 #####################################################################################################
 #####################   Prepare Data set to feed the model      #####################################
 #####################################################################################################
 
 
-#Path to Reviews File
+##Path to Reviews File
 path_in = '/GIOTA/DataInput/AmazonReviews/Reviews_new.csv'
 
-#Read file using pandas - creates a data frame
-import pandas as pd
-import nltk
-# create data frame using read_csv from pandas
+##Read file using pandas - creates a data frame
+#create data frame using read_csv from pandas
 Reviews = pd.read_csv(path_in, sep=",", header = 'infer')
-# keep only score and text columns
+
+##keep only score and text columns
 Reviews.drop(Reviews.columns[[0,1,2,3,4,5,7,8]], axis=1, inplace=True)
 
-# remove punctuation and then lower case in a new column
+#len(Reviews) - #568454 reviews - to many reviews to handle
+
+##remove punctuation and then lower case in a new column
 Reviews['CleanReview']=Reviews['Text'].astype(str)
 Reviews['CleanReview']=Reviews['CleanReview'].str.replace('[^a-zA-Z\s]','').str.lower()
 
-
-# create one hot vector for score (0-4) 
-import numpy as np
-def one_hot(i):
-    a = np.zeros(5, 'uint8')
-    a[i] = 1
-    return a
-
-#Convert score to int
-Reviews['Score']=Reviews['Score'].astype(int)
-#create one hot vector in a separate column
-Reviews['Score_label']=Reviews['Score'].apply(lambda x: one_hot(x-1))
-
-#take the length of each review in a new column in order to filter reviews by length
-Reviews['WordCount']=Reviews['CleanReview'].apply(len)
-
-#keep reviews with max length 100 words 
-Reviews100=Reviews.loc[Reviews['WordCount'] <= 100]
-
-#number of reviews with length 100
-#rows=Reviews100.shape[0] #[0] Rows, [1] Columns
-#print(rows) #20550 reviews found
-
-#function to remove stop words
+#function to return words count
 def review_words(review_row):
     words = review_row.split()
-    from nltk.corpus import stopwords
-    meaningful_words = [w for w in words if not w in stopwords.words('english')]
-    return( " ".join( meaningful_words ))
+    return( len(words))
 
-#Pre-process the review text and store in a separate column
-Reviews100['Review_Words']=Reviews100['CleanReview'].apply(lambda x: review_words(x))
+#Store review words ount in a separate column
+Reviews['WordCount']=Reviews['CleanReview'].apply(lambda x: review_words(x))
 
-#Add start and end token to final reviews
-start_token = "START_T"
-end_token = "END_T"
-Reviews100['Review_Words']= ["%s %s %s" % (start_token, x, end_token) for x in Reviews100['Review_Words']]
+##reviews max and min length
+print("Minimum-length reviews: {}".format(min(Reviews['WordCount'])))
+print("Maximum review length: {}".format(max(Reviews['WordCount'])))
 
-Reviews100.groupby('Score').count()
-#1 	1365 
-#2 	687 
-#3 	1171 
-#4 	2750 
-#5 	14577 
+#Minimum-length reviews: 0
+#Maximum review length: 3393
+###the maximum review length is way too many steps for our RNN. Let's truncate to less steps.
+###we will use a variable to define the n_steps to filter our reviews
 
-#we will keep 10 reviews of each score for training and 5 for testing
-# Randomly sample 15 reviews of each score as final dataset
-Reviews5 = Reviews100.loc[Reviews100['Score'] == 5].sample(15)
-Reviews4 = Reviews100.loc[Reviews100['Score'] == 4].sample(15)
-Reviews3 = Reviews100.loc[Reviews100['Score'] == 3].sample(15)
-Reviews2 = Reviews100.loc[Reviews100['Score'] == 2].sample(15)
-Reviews1 = Reviews100.loc[Reviews100['Score'] == 1].sample(15)
-ReviewsF = Reviews1.append([Reviews2, Reviews3, Reviews4, Reviews5])
+n_steps=100
+#keep reviews with non zero max length 100 words 
+ReviewsN=Reviews.loc[Reviews['WordCount'] <= n_steps]
+ReviewsN=ReviewsN.loc[Reviews['WordCount'] > 0]
 
-#Join all the words in final review to build a corpus
-all_text = ' '.join(ReviewsF['Review_Words'])
+#print(len(ReviewsN))
+#435219 reviews with max length 100 words
+ReviewsN.groupby('Score').count()
+##Group by Score(Label)
+#1 - 38797 
+#2 - 21130 
+#3 - 28921 
+#4 - 56522 
+#5 - 289849
+
+#The model will predict only negative/positive, so we will change the score 1,2 to 0 and 3,4 to 1
+#Score 3 is ignored
+
+#Random Selection of specific reviews by group
+ReviewsNo = 12000
+Reviews5 = ReviewsN.loc[ReviewsN['Score'] == 5].sample(ReviewsNo)
+Reviews4 = ReviewsN.loc[ReviewsN['Score'] == 4].sample(ReviewsNo)
+Reviews2 = ReviewsN.loc[ReviewsN['Score'] == 2].sample(ReviewsNo)
+Reviews1 = ReviewsN.loc[ReviewsN['Score'] == 1].sample(ReviewsNo)
+
+ReviewsF = Reviews1.append([Reviews2, Reviews4, Reviews5])
+
+#Random selection of total number of reviews
+TotalReviewsNo = 25000
+ReviewsF=ReviewsF.sample(TotalReviewsNo)
+
+#Reviews Random group by Score
+ReviewsF.groupby('Score').count()
+#1 - 6204 
+#2 - 6262 
+#4 - 6248 
+#5 - 6286 
+
+#Join all the words to build a corpus
+all_text = ' '.join(ReviewsF['CleanReview'])
 words = all_text.split()
+
 # Count the word frequencies
 word_freq = nltk.FreqDist(words)
-print ("Found %d unique words tokens." % len(word_freq.items())) #Found 3903 unique words tokens.
+print ("Found %d unique words tokens." % len(word_freq.items())) 
+#Found 29667 unique words tokens
 
-# Convert words to integers
+#Create the dictionary that maps vocab words to integers
+#Later we're going to pad our input vectors with zeros, so the integers start at 1, not 0
 from collections import Counter
 counts = Counter(words)
 vocab = sorted(counts, key=counts.get, reverse=True)
 vocab_to_int = {word: ii for ii, word in enumerate(vocab, 1)}
-#add empty text as 0
-vocab_to_int['EMPTY_T'] = 0
+#print(len(vocab_to_int)) #-29667
 
-# Randomly sample 10 reviews of each score for training
-Reviews5 = ReviewsF.loc[ReviewsF['Score'] == 5].sample(10)
-Reviews4 = ReviewsF.loc[ReviewsF['Score'] == 4].sample(10)
-Reviews3 = ReviewsF.loc[ReviewsF['Score'] == 3].sample(10)
-Reviews2 = ReviewsF.loc[ReviewsF['Score'] == 2].sample(10)
-Reviews1 = ReviewsF.loc[ReviewsF['Score'] == 1].sample(10)
-ReviewsTR = Reviews1.append([Reviews2, Reviews3, Reviews4, Reviews5])
-
-# Randomly sample 5 reviews of each score for training
-Reviews5 = ReviewsF.loc[ReviewsF['Score'] == 5].sample(5)
-Reviews4 = ReviewsF.loc[ReviewsF['Score'] == 4].sample(5)
-Reviews3 = ReviewsF.loc[ReviewsF['Score'] == 3].sample(5)
-Reviews2 = ReviewsF.loc[ReviewsF['Score'] == 2].sample(5)
-Reviews1 = ReviewsF.loc[ReviewsF['Score'] == 1].sample(5)
-ReviewsTE = Reviews1.append([Reviews2, Reviews3, Reviews4, Reviews5])
-
-#create reviews to int using the vocabulary for both training and testing dataset
-reviews_ints_tr = []
-for each in ReviewsTR['Review_Words']:
-    reviews_ints_tr.append([vocab_to_int[word] for word in each.split()])
-
-reviews_ints_te = []
-for each in ReviewsTE['Review_Words']:
-    reviews_ints_te.append([vocab_to_int[word] for word in each.split()])
-
-#fill review vectors with 0(-empty text) in order to have fixed length for all vectors
-#we use the maximum length of each dataset instead of vocabulary length
-def same_len_vector(reviews_int):
-    #get maxlen of reviews
-    maxlen=0
-    for ii, x in enumerate(reviews_int):
-        if len(x)>maxlen:
-            maxlen=len(x)
-
-    #fill with 0 
-    #import numpy as np
-    x = np.zeros((len(reviews_int),maxlen), 'uint64')
-    for ii, r in enumerate(reviews_int):
-        for col in range(0,maxlen-1): 
-            if col<len(r):
-                x[ii,col]=r[col]
-    return x
+#create reviews to int using the vocabulary 
+reviews_ints = []
+for each in ReviewsF['CleanReview']:
+    reviews_ints.append([vocab_to_int[word] for word in each.split()])
+#print(len(reviews_ints)) #- 25000
 
 
-X_tr=same_len_vector(reviews_ints_tr)
-X_te=same_len_vector(reviews_ints_te)
+#create an array features that contains the data we'll pass to the network 
+#The data should come from review_ints, since we want to feed integers to the network 
+#Each row should be n_steps elements long. For reviews shorter than n_steps, left pad with 0s
 
-#take score labels for both training and testing dataset     
-score_labels_tr = ReviewsTR['Score_label']
-score_labels_te = ReviewsTE['Score_label']
+seq_len = n_steps
+features = np.zeros((len(reviews_ints), seq_len), dtype=int)
 
-#Convert to array in order to feed the model
-Y_tr = np.array(score_labels_tr)
-Y_tr = np.vstack([np.expand_dims(y, 0) for y in Y_tr])
+for i, row in enumerate(reviews_ints):
+    if len(row)>0:
+        features[i, -len(row):] = np.array(row)[:seq_len]
 
-Y_te = np.array(score_labels_te)
-Y_te = np.vstack([np.expand_dims(y, 0) for y in Y_te])
+#print test row
+print(len(features))
+print(type(features))
+print(features[10])
+print(len(features[10]))
+print(reviews_ints[10])
+print(len(reviews_ints[10]))
+
+#Convert score to binary - values 1-3 means negative(0), values 4,5 means positive(1)
+ReviewsF['Score_label']=ReviewsF['Score'].apply(lambda x: 0 if x < 3 else 1)
+#labels set as array
+labels=np.array(ReviewsF['Score_label'])
+
+#split data set into training, validation, and test sets
+#Usually split fraction is set to 0.8 or 0.9 for training 
+#The rest of the data will be split in half to create the validation and testing data.
+split_frac = 0.8
+
+split_index = int(split_frac * len(features))
+
+train_x, val_x = features[:split_index], features[split_index:] 
+train_y, val_y = labels[:split_index], labels[split_index:]
+
+split_frac = 0.5
+split_index = int(split_frac * len(val_x))
+
+val_x, test_x = val_x[:split_index], val_x[split_index:]
+val_y, test_y = val_y[:split_index], val_y[split_index:]
+
+print("\t\t\tFeature Shapes:")
+print("Train set: \t\t{}".format(train_x.shape), 
+      "\nValidation set: \t{}".format(val_x.shape),
+      "\nTest set: \t\t{}".format(test_x.shape))
+print("label set: \t\t{}".format(train_y.shape), 
+      "\nValidation label set: \t{}".format(val_y.shape),
+      "\nTest label set: \t\t{}".format(test_y.shape))
+
+#With train, validation, and text fractions of 0.8, 0.1, 0.1, the final shapes looks like:
+#Train set: (20000, 100) 
+#Validation set: (2500, 100) 
+#Test set: (2500, 100)
+#label set:  (20000,) 
+#Validation label set: (2500,) 
+#Test label set: (2500,)
+
+#Train set labels count
+#np.unique(train_y,return_counts=True) #0-9957, 1-10043
+#Val set labels count
+#np.unique(val_y,return_counts=True)   #0-1246, 1-1254
+#Test set labels count
+#np.unique(test_y,return_counts=True)  #0-1263, 1-1237
+
+
+
 
 #####################################################################################################
 #####################   Build the graph                         #####################################
 #####################################################################################################
-
-import tensorflow as tf
-
-#Build the graph
-#Define Hyper-Parameters
-#lstm_size -> Number of units in the hidden layers in the LSTM cells
+######Define Hyper-Parameters######
+#lstm_size -> Number of units in the hidden layers in the LSTM cells.Larger is better performance wise.Common values are 128, 256, 512, etc. 
 #lstm_layers -> Number of LSTM layers in the network. Start with 1, then add more if underfitting
 #batch_size -> The number of reviews to feed the network in one training pass. Typically this should be set as high as you can go without running out of memory.
 #learning_rate -> Learning rate
-
 lstm_size = 256
-lstm_layers = 1
-batch_size = 2
-learning_rate = 0.001
-#Create input placeholders
-n_words = len(vocab_to_int)
+lstm_layers = 2
+batch_size = 1000
+learning_rate = 0.01
+
+#For the network itself, we'll be passing in our 198(max review length) element long review vectors. 
+#Each batch will be batch_size vectors. 
+#We'll also be using dropout on the LSTM layer for addressing overfitting, so we'll make a placeholder for the keep probability.
+
+n_words = len(vocab_to_int) + 1 # Add 1 for 0 added to vocab
+
 # Create the graph object
-graph = tf.Graph()
-# Add nodes to the graph
-with graph.as_default():
-    inputs_ = tf.placeholder(tf.int32, [None, None], name='inputs')
-    labels_ = tf.placeholder(tf.int32, [None, None], name='labels')
-    keep_prob = tf.placeholder(tf.float32, name='keep_prob')
-# Embedding - Efficient way to process the input vector is to do embedding instead of one-hot encoding
-# Size of the embedding vectors (number of units in the embedding layer)
-embed_size = 10
- 
-with graph.as_default():
+tf.reset_default_graph()
+with tf.name_scope('inputs'):
+    inputs_ = tf.placeholder(tf.int32, [None, None], name="inputs")
+    labels_ = tf.placeholder(tf.int32, [None, None], name="labels") #labels_ needs to be two-dimensional to work with some functions later
+    keep_prob = tf.placeholder(tf.float32, name="keep_prob") #keep_prob is a scalar (a 0-dimensional tensor), we shouldn't provide a size
+    
+######Embedding######
+#We need to add an embedding layer because there are 10522 words in our vocabulary. 
+#It is massively inefficient to one-hot encode our classes here. 
+#Instead of one-hot encoding, we can have an embedding layer and use that layer as a lookup table and let the network learn the weights
+
+embed_size = 300 # Size of the embedding vectors (number of units in the embedding layer)
+
+with tf.name_scope("Embeddings"):
     embedding = tf.Variable(tf.random_uniform((n_words, embed_size), -1, 1))
     embed = tf.nn.embedding_lookup(embedding, inputs_)
-#Build the LSTM cells
-with graph.as_default():
-    # The basic LSTM cell
-    lstm = tf.contrib.rnn.BasicLSTMCell(lstm_size)
- 
+
+######LSTM cell######
+#Define what the cells look like
+#To create a basic LSTM cell for the graph, we use the function tf.contrib.rnn.BasicLSTMCell with num_units=lstm_size and forget_bias=1.0(default)
+#We add dropout to the cell with tf.contrib.rnn.DropoutWrapper function. This just wraps the cell in another cell, but with dropout added to the inputs and/or outputs.
+#The network will have better performance with more layers. Adding more layers allows the network to learn really complex relationships. 
+#To create multiple layers of LSTM cells we use tf.contrib.rnn.MultiRNNCell function 
+
+def lstm_cell():
+    # Our basic LSTM cell
+    lstm = tf.contrib.rnn.BasicLSTMCell(lstm_size, reuse=tf.get_variable_scope().reuse)
     # Add dropout to the cell
-    drop = tf.contrib.rnn.DropoutWrapper(lstm, output_keep_prob=keep_prob)
- 
+    return tf.contrib.rnn.DropoutWrapper(lstm, output_keep_prob=keep_prob)
+
+with tf.name_scope("RNN_layers"):
     # Stack up multiple LSTM layers, for deep learning
-    cell = tf.contrib.rnn.MultiRNNCell([drop] * lstm_layers)
- 
+    cell = tf.contrib.rnn.MultiRNNCell([lstm_cell() for _ in range(lstm_layers)])
+    
+    #[drop] * lstm_layers creates a list of cells (drop) that is lstm_layers long 
+    #The MultiRNNCell wrapper builds this into multiple layers of RNN cells, one for each cell in the list
+    
     # Getting an initial state of all zeros
-    initial_state = cell.zero_state(batch_size, tf.float32)
-#RNN Forward pass
-with graph.as_default():
-    outputs, final_state = tf.nn.dynamic_rnn(cell, embed,
-    initial_state=initial_state)
-### Output - Final output of the RNN layer will be used for sentiment prediction.
-### So we need to grab the last output with `outputs[:, -1]`, the cost from that and `labels_`.
-with graph.as_default():
+    initial_state = cell.zero_state(batch_size, tf.float32)   
+    
+######RNN forward pass######
+#We actually run the data through the RNN nodes using tf.nn.dynamic_rnn 
+#by passing the inputs(vectors from the embedding layer) to the network to the multiple layered LSTM cell    
+
+with tf.name_scope("RNN_forward"):
+    outputs, final_state = tf.nn.dynamic_rnn(cell, embed, initial_state=initial_state)
+
+#We created an initial state to pass to the RNN. This is the cell state that is passed between the hidden layers in successive time steps.
+#It returns outputs for each time step and the final_state of the hidden layer.    
+
+######Output######
+#We only care about the final output, we'll be using that as our sentiment prediction. 
+#So we need to grab the last output with outputs[:, -1], the cost from that and labels_.
+
+with tf.name_scope('predictions'):
     predictions = tf.contrib.layers.fully_connected(outputs[:, -1], 1, activation_fn=tf.sigmoid)
+    tf.summary.histogram('predictions', predictions)
+with tf.name_scope('cost'):
     cost = tf.losses.mean_squared_error(labels_, predictions)
- 
+    tf.summary.scalar('cost', cost)
+
+with tf.name_scope('train'):
     optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cost)
-## Graph for checking Validation accuracy
-with graph.as_default():
+
+merged = tf.summary.merge_all()
+
+######Validation accuracy######
+#We add a few nodes to calculate the accuracy which we'll use in the validation pass
+with tf.name_scope('validation'):
     correct_pred = tf.equal(tf.cast(tf.round(predictions), tf.int32), labels_)
     accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
     
-### Batching - Pick only full batches of data and return based on the batch_size
-### Version 1 - using yield instead of return - in memory###
+######Batching######
+#This is a simple function for returning batches from our data. 
+#First it removes data such that we only have full batches. 
+#Then it iterates through the x and y arrays and returns slices out of those arrays with size [batch_size].
+
 def get_batches(x, y, batch_size):
     n_batches = len(x)//batch_size
     x, y = x[:n_batches*batch_size], y[:n_batches*batch_size]
     for ii in range(0, len(x), batch_size):
         yield x[ii:ii+batch_size], y[ii:ii+batch_size]
+        
 
-### Version 2 ###
-def get_batches(X, Y, b_size):
-    ret = []
-    total_batches = X.shape[0]//b_size
-    for i in range(total_batches):
-        ret.append((X[ i: i+b_size ] , Y[ i: i+b_size ]))
-    return ret
-
-#####################################################################################################
-#####################   Generic Functions                       #####################################
-#####################################################################################################
-import sys
-def print_same_line(item):
-    print(item)
-    sys.stdout.write("\033[F")# Cursor up one line
 
 #####################################################################################################
 #####################   Training and validation in batches      #####################################
 #####################################################################################################
 
 ###Training and validation in batches
-###Once the graph is defined, training can be done in batches based on the batch_size hyper parameter.
-###Models trains to improve the accuracy of the prediction.
-batches = get_batches(X_tr, Y_tr, batch_size)
-epochs = 10
- 
-with graph.as_default():
-    saver = tf.train.Saver()
- 
-with tf.Session(graph=graph) as sess:
-    # Initializing the variables
-    sess.run(tf.global_variables_initializer())
-    #iteration = 1
-    iterations = []
-    tr_acc = []
-    test_acc = []
-    costs = []
-    for e in range(epochs):
-        average_cost = 0.
-        average_acc = 0.
-        b = 0
+###Once the graph is defined, training can be done in batches based on the batch_size hyper parameter.        
+
+n_epochs = 10
+batches = len(train_x)//batch_size
+display_step = 1
+
+# with graph.as_default():
+saver = tf.train.Saver()
+
+with tf.Session() as sess:
+    sess.run(tf.global_variables_initializer()) #Initialize all variables
+    #matrices to store values for charts
+    epochs = []  #Iterations
+    tr_acc = []  #Training Accuracy
+    val_acc = [] #Val Accuracy
+    test_acc = [] #Bach Accuracy
+    costs = []  #Loss   
+
+    for e in range(n_epochs):
         state = sess.run(initial_state)
- 
-        for ii, (x, y) in enumerate(batches, 1):
+        for ii, (x, y) in enumerate(get_batches(train_x, train_y, batch_size), 1):
+            average_cost = 0.
+            average_acc = 0.
             feed = {inputs_: x,
-                #labels_: y[:, None],
-                labels_: y,
-                keep_prob: 0.5,
-                initial_state: state}
-            batch_acc, loss, state, _ = sess.run([accuracy, cost, final_state, optimizer], feed_dict=feed)
-            
-            b+=1
-            #print_same_line( "Iter " + str(e+1) + " Batch " + str(b) + "/" + str(len(batches)) + " cost " + str(loss) + " tr_acc " + str(batch_acc))
-            average_cost += loss/len(batches)
-            average_acc += batch_acc/len(batches)
-        print( "Iter " + str(e) + ", Minibatch Loss= " + "{:.6f}".format(average_cost)+ ", Minibatch Accuracy= " + "{:.6f}".format(average_acc) )
-        # add results to matrices
-        iterations.append(e+1)
-        tr_acc.append(average_acc)
-        #test_acc.append(tes_acc)
-        costs.append(average_cost)
+                    labels_: y[:, None],
+                    keep_prob: 0.5,
+                    initial_state: state}
+
+            batch_acc, summary, loss, state, _ = sess.run([accuracy, merged, cost, final_state, optimizer], feed_dict=feed)
+            average_cost += loss/batches 
+            average_acc += batch_acc/batches
+
+        if (e+1) % display_step == 0:
+        #calculate val acc
+            val_state = sess.run(cell.zero_state(batch_size, tf.float32))
+            for x, y in get_batches(val_x, val_y, batch_size):
+                feed = {inputs_: x,
+                        labels_: y[:, None],
+                        keep_prob: 1,
+                        initial_state: val_state}
+                summary, batch_acc, val_state = sess.run([merged, accuracy, final_state], feed_dict=feed)
+                test_acc.append(batch_acc)
+
+            print("Epoch: "+str('%04d' % (e+1))+" Cost="+"{:.9f}".format(average_cost)+
+                  " Train accuracy="+"{:.9f}".format(average_acc)+
+                  " Val accuracy="+"{:.9f}".format(np.mean(test_acc)))
+            # add results to matrices
+            epochs.append(e+1)
+            tr_acc.append(average_cost)
+            val_acc.append(np.mean(test_acc))
+            costs.append(average_acc)
         
+        saver.save(sess, './sentiment_model.ckpt')
+  
     print("Optimization Finished!")
-
-
+    
 #####################################################################################################
 ##################### Charts for learning curve and train cost  #####################################
 #####################################################################################################
@@ -303,8 +359,8 @@ ax.set_title("Learning curve")
 ax.set_xlabel('Iterations')
 ax.set_ylabel('Accuracy')
 ax.set_ylim([0, 1])
-ax.plot(iterations, tr_acc,     'o-', color="g", label="Train Accuracy")
-#ax.plot(iterations, test_acc,   'o-', color="r", label="Test Accuracy")
+ax.plot(epochs, tr_acc,     'o-', color="g", label="Train Accuracy")
+ax.plot(epochs, val_acc,   'o-', color="r", label="Test Accuracy")
 
 ax2 = fig1.add_subplot(122)
 ax2.clear()
@@ -314,4 +370,39 @@ ax2.set_xlabel('Iterations')
 ax2.set_ylabel('Cost')
 #ax2.set_ylim(bottom=0 )
 ax2.set_ylim(ymin=0)
-ax2.plot(iterations, costs, 'o-', color="r", label="Train cost")
+ax2.plot(epochs, costs, 'o-', color="r", label="Train cost")
+
+
+
+
+#####################################################################################################
+#####################   Testing             #########################################################
+#####################################################################################################    
+    
+test_pred = []
+test_acc = []
+with tf.Session() as sess:
+    saver.restore(sess, './sentiment_model.ckpt')
+    test_state = sess.run(cell.zero_state(batch_size, tf.float32))
+    for ii, (x, y) in enumerate(get_batches(test_x, test_y, batch_size), 1):
+        feed = {inputs_: x,
+                labels_: y[:, None],
+                keep_prob: 1,
+                initial_state: test_state}
+        batch_acc, test_state = sess.run([accuracy, final_state], feed_dict=feed)
+        test_acc.append(batch_acc)
+        
+        prediction = tf.cast(tf.round(predictions),tf.int32)
+        prediction = sess.run(prediction,feed_dict=feed)
+        test_pred.append(prediction)
+
+    ##Confusion Matrix
+    test_pred_flat = (np.array(test_pred)).flatten()
+    y_act = pd.Series(test_y, name='Actual')
+    y_pred = pd.Series(test_pred_flat, name='Predicted')
+    df_confusion = pd.crosstab(y_actu, y_pred, margins=True)
+
+    print("Test accuracy: {:.3f}".format(np.mean(test_acc)))  
+    print("Confusion Matrix")
+    print("----------------")
+    print(df_confusion)
