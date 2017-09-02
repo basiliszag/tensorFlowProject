@@ -64,24 +64,26 @@ ReviewsN.groupby('Score').count()
 #Score 3 is ignored
 
 #Random Selection of specific reviews by group
-ReviewsNo = 12000
+ReviewsNo = 30000
 Reviews5 = ReviewsN.loc[ReviewsN['Score'] == 5].sample(ReviewsNo)
 Reviews4 = ReviewsN.loc[ReviewsN['Score'] == 4].sample(ReviewsNo)
-Reviews2 = ReviewsN.loc[ReviewsN['Score'] == 2].sample(ReviewsNo)
+Reviews2 = ReviewsN.loc[ReviewsN['Score'] == 2].sample(21000)
 Reviews1 = ReviewsN.loc[ReviewsN['Score'] == 1].sample(ReviewsNo)
 
 ReviewsF = Reviews1.append([Reviews2, Reviews4, Reviews5])
+print(len(ReviewsF))
+#111000
 
 #Random selection of total number of reviews
-TotalReviewsNo = 25000
+TotalReviewsNo = 110000
 ReviewsF=ReviewsF.sample(TotalReviewsNo)
 
 #Reviews Random group by Score
 ReviewsF.groupby('Score').count()
-#1 - 6204 
-#2 - 6262 
-#4 - 6248 
-#5 - 6286 
+#1 - 29740 
+#2 - 20805 
+#4 - 29730 
+#5 - 29725 
 
 #Join all the words to build a corpus
 all_text = ' '.join(ReviewsF['CleanReview'])
@@ -90,7 +92,7 @@ words = all_text.split()
 # Count the word frequencies
 word_freq = nltk.FreqDist(words)
 print ("Found %d unique words tokens." % len(word_freq.items())) 
-#Found 29667 unique words tokens
+#Found 64013  unique words tokens
 
 #Create the dictionary that maps vocab words to integers
 #Later we're going to pad our input vectors with zeros, so the integers start at 1, not 0
@@ -98,13 +100,13 @@ from collections import Counter
 counts = Counter(words)
 vocab = sorted(counts, key=counts.get, reverse=True)
 vocab_to_int = {word: ii for ii, word in enumerate(vocab, 1)}
-#print(len(vocab_to_int)) #-29667
+#print(len(vocab_to_int)) #-64013
 
 #create reviews to int using the vocabulary 
 reviews_ints = []
 for each in ReviewsF['CleanReview']:
     reviews_ints.append([vocab_to_int[word] for word in each.split()])
-#print(len(reviews_ints)) #- 25000
+#print(len(reviews_ints)) #- 110000
 
 
 #create an array features that contains the data we'll pass to the network 
@@ -134,7 +136,7 @@ labels=np.array(ReviewsF['Score_label'])
 #split data set into training, validation, and test sets
 #Usually split fraction is set to 0.8 or 0.9 for training 
 #The rest of the data will be split in half to create the validation and testing data.
-split_frac = 0.8
+split_frac = 0.9
 
 split_index = int(split_frac * len(features))
 
@@ -156,21 +158,19 @@ print("label set: \t\t{}".format(train_y.shape),
       "\nTest label set: \t\t{}".format(test_y.shape))
 
 #With train, validation, and text fractions of 0.8, 0.1, 0.1, the final shapes looks like:
-#Train set: (20000, 100) 
-#Validation set: (2500, 100) 
-#Test set: (2500, 100)
-#label set:  (20000,) 
-#Validation label set: (2500,) 
-#Test label set: (2500,)
+#Train set: (99000, 100) 
+#Validation set: (5500, 100) 
+#Test set: (5500, 100)
+#label set:  (99000,) 
+#Validation label set: (5500,) 
+#Test label set: (5500,)
 
 #Train set labels count
-#np.unique(train_y,return_counts=True) #0-9957, 1-10043
+#np.unique(train_y,return_counts=True) #0-45511, 1-53489
 #Val set labels count
-#np.unique(val_y,return_counts=True)   #0-1246, 1-1254
+#np.unique(val_y,return_counts=True)   #0-2540, 1-2960
 #Test set labels count
-#np.unique(test_y,return_counts=True)  #0-1263, 1-1237
-
-
+#np.unique(test_y,return_counts=True)  #0-2494, 1-3006
 
 
 #####################################################################################################
@@ -249,15 +249,10 @@ with tf.name_scope("RNN_forward"):
 
 with tf.name_scope('predictions'):
     predictions = tf.contrib.layers.fully_connected(outputs[:, -1], 1, activation_fn=tf.sigmoid)
-    tf.summary.histogram('predictions', predictions)
 with tf.name_scope('cost'):
     cost = tf.losses.mean_squared_error(labels_, predictions)
-    tf.summary.scalar('cost', cost)
-
 with tf.name_scope('train'):
     optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cost)
-
-merged = tf.summary.merge_all()
 
 ######Validation accuracy######
 #We add a few nodes to calculate the accuracy which we'll use in the validation pass
@@ -276,8 +271,6 @@ def get_batches(x, y, batch_size):
     for ii in range(0, len(x), batch_size):
         yield x[ii:ii+batch_size], y[ii:ii+batch_size]
         
-
-
 #####################################################################################################
 #####################   Training and validation in batches      #####################################
 #####################################################################################################
@@ -286,7 +279,7 @@ def get_batches(x, y, batch_size):
 ###Once the graph is defined, training can be done in batches based on the batch_size hyper parameter.        
 
 n_epochs = 10
-batches = len(train_x)//batch_size
+#batches = len(train_x)//batch_size
 display_step = 1
 
 # with graph.as_default():
@@ -296,25 +289,26 @@ with tf.Session() as sess:
     sess.run(tf.global_variables_initializer()) #Initialize all variables
     #matrices to store values for charts
     epochs = []  #Iterations
+    costs = []  #Loss
     tr_acc = []  #Training Accuracy
     val_acc = [] #Val Accuracy
-    test_acc = [] #Bach Accuracy
-    costs = []  #Loss   
+    b_cost= [] #Training Bach Cost
+    b_tr_acc = [] #Training Bach Accuracy
+    b_te_acc = [] #Val Bach Accuracy
+       
 
     for e in range(n_epochs):
         state = sess.run(initial_state)
         for ii, (x, y) in enumerate(get_batches(train_x, train_y, batch_size), 1):
-            average_cost = 0.
-            average_acc = 0.
             feed = {inputs_: x,
                     labels_: y[:, None],
                     keep_prob: 0.5,
                     initial_state: state}
 
-            batch_acc, summary, loss, state, _ = sess.run([accuracy, merged, cost, final_state, optimizer], feed_dict=feed)
-            average_cost += loss/batches 
-            average_acc += batch_acc/batches
-
+            batch_acc, loss, state, _ = sess.run([accuracy, cost, final_state, optimizer], feed_dict=feed)
+            b_tr_acc.append(batch_acc)
+            b_cost.append(loss)
+            
         if (e+1) % display_step == 0:
         #calculate val acc
             val_state = sess.run(cell.zero_state(batch_size, tf.float32))
@@ -323,17 +317,17 @@ with tf.Session() as sess:
                         labels_: y[:, None],
                         keep_prob: 1,
                         initial_state: val_state}
-                summary, batch_acc, val_state = sess.run([merged, accuracy, final_state], feed_dict=feed)
-                test_acc.append(batch_acc)
+                batch_acc, val_state = sess.run([accuracy, final_state], feed_dict=feed)
+                b_te_acc.append(batch_acc)
 
-            print("Epoch: "+str('%04d' % (e+1))+" Cost="+"{:.9f}".format(average_cost)+
-                  " Train accuracy="+"{:.9f}".format(average_acc)+
-                  " Val accuracy="+"{:.9f}".format(np.mean(test_acc)))
+            print("Epoch: "+str('%04d' % (e+1))+" Cost="+"{:.9f}".format(np.mean(b_cost))+
+                  " Train accuracy="+"{:.9f}".format(np.mean(b_tr_acc))+
+                  " Val accuracy="+"{:.9f}".format(np.mean(b_te_acc)))
             # add results to matrices
             epochs.append(e+1)
-            tr_acc.append(average_cost)
-            val_acc.append(np.mean(test_acc))
-            costs.append(average_acc)
+            tr_acc.append(b_cost)
+            val_acc.append(np.mean(b_te_acc))
+            costs.append(b_tr_acc)
         
         saver.save(sess, './sentiment_model.ckpt')
   
