@@ -1,3 +1,16 @@
+##############################################################################################################################
+###Amazon Product Reviews - Sentiment Analysis using RNN project                                                           ### 
+##############################################################################################################################
+###In this notebook, we have implement a RNN that performs polarity sentiment analysis.
+###The dataset used for input is coming from Kaggle- https://www.kaggle.com/snap/amazon-fine-food-reviews 
+###and consists of 568,454 reviews. You may need to manage the csv externally before importing in Python - 
+###there is a special character that can not be loaded.                                                           
+###Team members of the project are : Giota Koufonikou, Zaglaras Vasilis, Konstantinos Lolos, George Pierrakos, Sofia Kouki
+###The code is splitted to 4 main parts :Data Preparation, Building the Graph, Training and Validation and Testing. 
+###You can execute in sequence the different parts,uncomment some lines to take printouts.
+###You can change some constants for dataset selection and model hyper-parameters
+##############################################################################################################################
+
 #####################################################################################################
 #####################   Import Libraries    #########################################################
 #####################################################################################################
@@ -11,9 +24,8 @@ import tensorflow as tf
 #####################   Prepare Data set to feed the model      #####################################
 #####################################################################################################
 
-
 ##Path to Reviews File
-path_in = '/GIOTA/DataInput/AmazonReviews/Reviews_new.csv'
+path_in = '/DataInput/AmazonReviews/Reviews_new.csv'
 
 ##Read file using pandas - creates a data frame
 #create data frame using read_csv from pandas
@@ -361,11 +373,8 @@ ax2.clear()
 ax2.set_title("Train cost")
 ax2.set_xlabel('Iterations')
 ax2.set_ylabel('Cost')
-#ax2.set_ylim(bottom=0 )
 ax2.set_ylim(ymin=0)
 ax2.plot(epochs, costs, 'o-', color="r", label="Train cost")
-
-
 
 
 #####################################################################################################
@@ -389,13 +398,81 @@ with tf.Session() as sess:
         prediction = sess.run(prediction,feed_dict=feed)
         test_pred.append(prediction)
 
-    ##Confusion Matrix
-    test_pred_flat = (np.array(test_pred)).flatten()
-    y_act = pd.Series(test_y, name='Actual')
-    y_pred = pd.Series(test_pred_flat, name='Predicted')
-    df_confusion = pd.crosstab(y_act, y_pred, margins=True)
 
-    print("Test accuracy: {:.3f}".format(np.mean(test_acc)))  
-    print("Confusion Matrix")
-    print("----------------")
-    print(df_confusion)
+#####################################################################################################
+#####################   Results             #########################################################
+#####################################################################################################    
+
+##############Confusion Matrix######################    
+test_pred_flat = (np.array(test_pred)).flatten()
+y_act = pd.Series(test_y, name='Actual')
+y_pred = pd.Series(test_pred_flat, name='Predicted')
+df_confusion = pd.crosstab(y_act, y_pred, margins=True)
+
+print("Test accuracy: {:.3f}".format(np.mean(test_acc)))  
+print("Confusion Matrix")
+print("----------------")
+print(df_confusion)
+    
+
+##############Review Text for Testing Results######################    
+#Take Reviews for test set
+start_idx = len(train_x) + len(val_x)
+end_idx = start_idx + len(test_pred_flat)
+ReviewsTest=ReviewsF.iloc[start_idx:end_idx]
+#Add Predicted Sentiment in a new column
+ReviewsTest['Predicted_Sentiment']= test_pred_flat
+
+#Examples of False Negative Results
+ReviewsTest[(ReviewsTest['Score_label'] == 1) & (ReviewsTest['Predicted_Sentiment'] == 0 )].iloc[1:10]    
+#Examples of False Positive Results
+ReviewsTest[(ReviewsTest['Score_label'] == 0) & (ReviewsTest['Predicted_Sentiment'] == 1 )].iloc[1:10]    
+
+##############WordCloud for Positive and Negative Sentiment######################
+from os import path
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+ 
+##Reviews with sentiment as Positive
+posActualReviews = ReviewsTest[ReviewsTest.Score_label==1]
+posPredReviews = ReviewsTest[ReviewsTest.Predicted_Sentiment==1]
+
+fig = plt.figure( figsize=(40,40))
+##Generate a word cloud image for Actual Positive Sentiment
+sub1= fig.add_subplot(2,2,1)
+plt.title("Positive Sentiment - Actual")
+ReviewText = ' '.join((posActualReviews['CleanReview']))
+wordcloud = WordCloud().generate(ReviewText)
+plt.imshow(wordcloud, interpolation='bilinear')
+plt.axis("off")
+ 
+##Generate a word cloud image for Predicted Positive Sentiment
+sub2= fig.add_subplot(2,2,2)
+plt.title("Positive Sentiment - Prediction")
+ReviewText = ' '.join((posPredReviews['CleanReview']))
+wordcloud = WordCloud().generate(ReviewText)
+plt.imshow(wordcloud, interpolation='bilinear')
+plt.axis("off")
+plt.show()
+
+##Reviews with sentiment as Negative
+negActualReviews = ReviewsTest[ReviewsTest.Score_label==0]
+negPredReviews = ReviewsTest[ReviewsTest.Predicted_Sentiment==0]
+
+fig = plt.figure( figsize=(40,40))
+##Generate a word cloud image for Actual Positive Sentiment
+sub1= fig.add_subplot(2,2,1)
+plt.title("Negative Sentiment - Actual")
+ReviewText = ' '.join((negActualReviews['CleanReview']))
+wordcloud = WordCloud().generate(ReviewText)
+plt.imshow(wordcloud, interpolation='bilinear')
+plt.axis("off")
+ 
+##Generate a word cloud image for Predicted Negative Sentiment
+sub2= fig.add_subplot(2,2,2)
+plt.title("Negative Sentiment - Prediction")
+ReviewText = ' '.join((negPredReviews['CleanReview']))
+wordcloud = WordCloud().generate(ReviewText)
+plt.imshow(wordcloud, interpolation='bilinear')
+plt.axis("off")
+plt.show()
